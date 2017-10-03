@@ -1,4 +1,4 @@
-resolver: lts-8.13
+resolver: nightly-2017-10-03
 
 packages:
 - tensorflow
