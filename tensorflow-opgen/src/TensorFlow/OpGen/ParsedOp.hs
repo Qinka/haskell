@@ -1,9 +1,9 @@
 -- | This module helps parse the proto OpDef into a Haskell type which is more
 -- descriptive of how the attributes and arguments will be used in the
 -- generated code.
-{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE LambdaCase        #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE RecordWildCards   #-}
 module TensorFlow.OpGen.ParsedOp
     ( ParsedOp(..)
     , Name(..)
@@ -21,54 +21,46 @@ module TensorFlow.OpGen.ParsedOp
     , camelCase
     ) where
 
-import Data.Char (toUpper, toLower)
-import Data.List (sortBy)
-import Data.List.NonEmpty (NonEmpty, nonEmpty)
-import Data.Maybe (mapMaybe)
-import Data.Monoid ((<>))
-import Data.Ord (comparing)
-import qualified Data.Set as Set
-import Data.Text (Text)
-import qualified Data.Text as Text
-import Lens.Family2 ((^.))
-import Proto.Tensorflow.Core.Framework.AttrValue (list)
-import Proto.Tensorflow.Core.Framework.OpDef
-    ( OpDef
-    , OpDef'ArgDef
-    , OpDef'AttrDef
-    , allowedValues
-    , attr
-    , maybe'defaultValue
-    , description
-    , name
-    , inputArg
-    , isRef
-    , isStateful
-    , outputArg
-    , summary
-    , typeListAttr
-    , numberAttr
-    , typeAttr
-    , type'
-    )
-import Proto.Tensorflow.Core.Framework.Types (DataType(DT_RESOURCE))
+import           Data.Char                                 (toLower, toUpper)
+import           Data.List                                 (sortBy)
+import           Data.List.NonEmpty                        (NonEmpty, nonEmpty)
+import           Data.Maybe                                (mapMaybe)
+import           Data.Monoid                               ((<>))
+import           Data.Ord                                  (comparing)
+import qualified Data.Set                                  as Set
+import           Data.Text                                 (Text)
+import qualified Data.Text                                 as Text
+import           Lens.Family2                              ((^.))
+import           Proto.Tensorflow.Core.Framework.AttrValue (list)
+import           Proto.Tensorflow.Core.Framework.OpDef     (OpDef, OpDef'ArgDef,
+                                                            OpDef'AttrDef,
+                                                            allowedValues, attr,
+                                                            description,
+                                                            inputArg, isRef,
+                                                            isStateful,
+                                                            maybe'defaultValue,
+                                                            name, numberAttr,
+                                                            outputArg, summary,
+                                                            type', typeAttr,
+                                                            typeListAttr)
+import           Proto.Tensorflow.Core.Framework.Types     (DataType (DT_RESOURCE))
 
 data ParsedOp = ParsedOp
-    { parsedOpName :: Name
-    , parsedOpSummary :: Text
-    , parsedOpDescription :: Text
-    , parsedInputs :: [ParsedArg]
-    , parsedOutputs :: [ParsedArg]
-    , explicitInputAttrs :: [Attr AttrType]
+    { parsedOpName          :: Name
+    , parsedOpSummary       :: Text
+    , parsedOpDescription   :: Text
+    , parsedInputs          :: [ParsedArg]
+    , parsedOutputs         :: [ParsedArg]
+    , explicitInputAttrs    :: [Attr AttrType]
         -- ^ Attributes that must be set explicitly when creating the op.
         -- Associated with the type of the attribute.
-    , inferredTypeAttrs :: [Attr TypeParam]
+    , inferredTypeAttrs     :: [Attr TypeParam]
         -- ^ Attributes that are type parameters.
     , inferredListSizeAttrs :: [Attr (NonEmpty Name)]
         -- Attributes which are list sizes (ints) that are inferred automatically
         -- from one or more of the input tensors.
         -- Associated with the list of tensors whose size it describes.
-    , parsedOpIsMonadic :: Bool
+    , parsedOpIsMonadic     :: Bool
         -- ^ Whether this op is stateful or takes a stateful input.  Such ops
         -- should not be CSE'd and must be monadic in our API (i.e., return a
         -- Build action).
@@ -76,7 +68,7 @@ data ParsedOp = ParsedOp
 
 data Name = Name
     { haskellName :: HaskellName
-    , tfName :: TFName
+    , tfName      :: TFName
     }
 
 -- | A raw name as specified in the OpDef proto.
@@ -88,9 +80,9 @@ newtype HaskellName = HaskellName { unHaskellName :: Text }
 
 -- | A named attribute, associated with some information about it.
 data Attr a = Attr
-    { attrName :: Name
+    { attrName        :: Name
     , attrDescription :: Text
-    , attrInfo :: a
+    , attrInfo        :: a
     }
 
 -- | The type of an attribute.
@@ -99,11 +91,11 @@ data AttrType = AttrSingle AttrBaseType
                 deriving Eq
 
 data AttrBaseType = AttrBytes | AttrInt64 | AttrFloat | AttrBool
-                | AttrType | AttrShape | AttrTensor
+                | AttrType | AttrShape | AttrTensor | AttrFunc
                 deriving Eq
 
 data TypeParam = TypeParam
-    { typeParamIsList :: Bool
+    { typeParamIsList       :: Bool
     , typeParamRestrictions :: Maybe (NonEmpty DataType)
         -- ^ The list of allowed types (see: TensorFlow.Types.OneOf).
         -- If 'Nothing', then any type is acceptable.
@@ -111,24 +103,24 @@ data TypeParam = TypeParam
 
 -- | An input or output argument (Tensor) for an op.
 data ParsedArg = ParsedArg
-    { parsedArgName :: Name
+    { parsedArgName        :: Name
     , parsedArgDescription :: Text
-    , parsedArgCase :: ParsedArgCase
+    , parsedArgCase        :: ParsedArgCase
     }
 
 data ParsedArgCase
     = SimpleArg { argType :: ArgType, argKind :: ArgKind }
     | ListArg
         { argLength :: Name  -- ^ The attribute that specifies this list's length.
-        , argType :: ArgType
-        , argKind :: ArgKind
+        , argType   :: ArgType
+        , argKind   :: ArgKind
         }
     | MixedListArg { argTypeAttr :: Name, argKind :: ArgKind }
         -- ^ A heterogeneous list.
 
 maybeArgType :: ParsedArgCase -> Maybe ArgType
 maybeArgType MixedListArg{} = Nothing
-maybeArgType a = Just $ argType a
+maybeArgType a              = Just $ argType a
 
 -- | The type of an argument.
 data ArgType
@@ -225,7 +217,7 @@ parseOp o = ParsedOp
                     || any (isRefCase . parsedArgCase) parsedInputs
                     || null (o ^. outputArg)
     parsedInputs = zipWith (\t a -> parseArg a (inputTensorKind t a))
-                                        tensorKindParams (o ^. inputArg) 
+                                        tensorKindParams (o ^. inputArg)
     tensorKindParams = ["v'" <> Text.pack (show x) | x <- [1::Integer ..]]
     parsedOutputs = map (\a -> parseArg a (outputTensorKind parsedOpIsMonadic a))
                         (o ^. outputArg)
@@ -279,9 +271,9 @@ getInferredTypeAttr argTypeParams a
 
 getArgTypeParam :: ParsedArgCase -> Maybe Name
 getArgTypeParam SimpleArg { argType = ArgTypeAttr n} = Just n
-getArgTypeParam ListArg { argType = ArgTypeAttr n} = Just n
-getArgTypeParam MixedListArg { argTypeAttr = n } = Just n
-getArgTypeParam _ = Nothing
+getArgTypeParam ListArg { argType = ArgTypeAttr n}   = Just n
+getArgTypeParam MixedListArg { argTypeAttr = n }     = Just n
+getArgTypeParam _                                    = Nothing
 
 getInferredListSizeAttr :: [ParsedArg] -> OpDef'AttrDef -> Maybe (NonEmpty Name)
 getInferredListSizeAttr inputs a
@@ -321,7 +313,7 @@ parseArgCase a tKind
         | otherwise = ArgTypeFixed (a ^. type')
     maybeAttr :: Text -> Maybe Name
     maybeAttr "" = Nothing
-    maybeAttr t = Just $ makeName t
+    maybeAttr t  = Just $ makeName t
 
 parseAttrType :: OpDef -> Text -> AttrType
 parseAttrType o = \case
@@ -332,6 +324,7 @@ parseAttrType o = \case
     "type" -> AttrSingle AttrType
     "shape" -> AttrSingle AttrShape
     "tensor" -> AttrSingle AttrTensor
+    "func" ->  AttrSingle AttrFunc
     "list(string)" -> AttrList AttrBytes
     "list(int)" -> AttrList AttrInt64
     "list(float)" -> AttrList AttrFloat
